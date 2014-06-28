@@ -71,6 +71,18 @@ case class Sample(fraction: Double, withReplacement: Boolean, seed: Long, child:
  * :: DeveloperApi ::
  */
 @DeveloperApi
+case class TableSample(fraction: Double, seed: Long, child: SparkPlan)
+  extends UnaryNode
+{
+  override def output = child.output
+  override def execute() = child.execute().sample(false, fraction, seed).map(row =>
+    row.createRowWithWeights(fraction))
+}
+
+/**
+ * :: DeveloperApi ::
+ */
+@DeveloperApi
 case class Union(children: Seq[SparkPlan])(@transient sqlContext: SQLContext) extends SparkPlan {
   // TODO: attributes output by union should be distinct for nullability purposes
   override def output = children.head.output

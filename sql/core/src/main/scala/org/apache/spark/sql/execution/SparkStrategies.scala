@@ -264,6 +264,8 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
         execution.Aggregate(partial = false, group, agg, planLater(child))(sqlContext) :: Nil
       case logical.Sample(fraction, withReplacement, seed, child) =>
         execution.Sample(fraction, withReplacement, seed, planLater(child)) :: Nil
+      case logical.TableSample(fraction, seed, child) =>
+        execution.TableSample(fraction, seed, planLater(child)) :: Nil
       case logical.LocalRelation(output, data) =>
         val dataAsRdd =
           sparkContext.parallelize(data.map(r =>

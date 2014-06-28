@@ -143,4 +143,8 @@ class JoinedRow extends Row {
     val row = (if (row1 != null) row1 else Seq[Any]()) ++ (if (row2 != null) row2 else Seq[Any]())
     s"[${row.mkString(",")}]"
   }
+
+  def createRowWithWeights(i: Double) = {
+    throw new UnsupportedOperationException
+  }
 }

@@ -202,6 +202,14 @@ case class Sample(fraction: Double, withReplacement: Boolean, seed: Long, child:
   override def references = Set.empty
 }
 
+
+case class TableSample(fraction: Double, seed: Long, child: LogicalPlan)
+  extends UnaryNode {
+
+  override def output = child.output ++ Seq(AttributeReference("$weight", DoubleType, false)())
+  override def references = Set.empty
+}
+
 case class Distinct(child: LogicalPlan) extends UnaryNode {
   override def output = child.output
   override def references = child.outputSet

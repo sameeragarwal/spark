@@ -301,6 +301,18 @@ class SchemaRDD(
 
   /**
    * :: Experimental ::
+   * Returns a sampled version of the underlying dataset along with per-row weights.
+   *
+   * @group Query
+   */
+  @Experimental
+  def tablesample(
+              fraction: Double,
+              seed: Long = System.currentTimeMillis) =
+    new SchemaRDD(sqlContext, TableSample(fraction, seed, logicalPlan))
+
+  /**
+   * :: Experimental ::
    * Return the number of elements in the RDD. Unlike the base RDD implementation of count, this
    * implementation leverages the query optimizer to compute the count on the SchemaRDD, which
    * supports features such as filter pushdown.
