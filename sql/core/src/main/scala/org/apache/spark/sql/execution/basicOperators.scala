@@ -75,8 +75,9 @@ case class TableSample(fraction: Double, seed: Long, child: SparkPlan)
   extends UnaryNode
 {
   override def output = child.output
+  //TODO(sameer): We need to have integer weights to support UDF scaling
   override def execute() = child.execute().sample(false, fraction, seed).map(row =>
-    row.createRowWithWeights(fraction))
+    row.createRowWithWeights(1/fraction))
 }
 
 /**

@@ -60,7 +60,7 @@ trait Row extends Seq[Any] with Serializable {
 
   def copy(): Row
 
-  def createRowWithWeights(i: Double): Row
+  def createRowWithWeights(weight: Double): Row
 
   /** Returns true if there are any NULL values in this row. */
   def anyNull: Boolean = {
@@ -122,7 +122,7 @@ object EmptyRow extends Row {
 
   def copy() = this
 
-  def createRowWithWeights(i: Double) = this
+  def createRowWithWeights(weight: Double) = this
 }
 
 /**
@@ -186,9 +186,9 @@ class GenericRow(protected[catalyst] val values: Array[Any]) extends Row {
 
   def copy() = this
 
-  def createRowWithWeights(i: Double) = {
+  def createRowWithWeights(weight: Double) = {
     var newRow = new GenericRow(values.clone() ++ Array(0.0))
-    newRow.values(newRow.size - 1) = i
+    newRow.values(newRow.size - 1) = weight
     newRow
   }
 }

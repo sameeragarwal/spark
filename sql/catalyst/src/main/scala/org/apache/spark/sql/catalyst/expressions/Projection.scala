@@ -144,7 +144,7 @@ class JoinedRow extends Row {
     s"[${row.mkString(",")}]"
   }
 
-  def createRowWithWeights(i: Double) = {
+  def createRowWithWeights(weight: Double) = {
     throw new UnsupportedOperationException
   }
 }
