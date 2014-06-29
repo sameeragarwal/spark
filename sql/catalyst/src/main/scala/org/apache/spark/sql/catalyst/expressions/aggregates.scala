@@ -18,6 +18,7 @@
 package org.apache.spark.sql.catalyst.expressions
 
 import com.clearspring.analytics.stream.cardinality.HyperLogLog
+import org.apache.commons.math.stat.descriptive.summary.SumOfSquares
 
 import org.apache.spark.sql.catalyst.types._
 import org.apache.spark.sql.catalyst.trees
@@ -227,6 +228,27 @@ case class Average(child: Expression) extends PartialAggregate with trees.UnaryN
   override def newInstance() = new AverageFunction(child, this)
 }
 
+case class ApproximateAverage(child: Expression) extends PartialAggregate with trees.UnaryNode[Expression] {
+  override def references = child.references
+  override def nullable = false
+  override def dataType = DoubleType
+  override def toString = s"APPROX_AVG($child)"
+
+  override def asPartial: SplitEvaluation = {
+    val partialSum = Alias(Sum(child), "PartialSum")()
+    val partialCount = Alias(Count(child), "PartialCount")()
+    val partialSumOfSquares = Alias(SumOfSquares(child), "PartialSumOfSquares")()
+    val castedSum = Cast(Sum(partialSum.toAttribute), dataType)
+    val castedCount = Cast(Sum(partialCount.toAttribute), dataType)
+
+    SplitEvaluation(
+      Divide(castedSum, castedCount),
+      partialCount :: partialSum :: Nil)
+  }
+
+  override def newInstance() = new AverageFunction(child, this)
+}
+
 case class Sum(child: Expression) extends PartialAggregate with trees.UnaryNode[Expression] {
   override def references = child.references
   override def nullable = false
@@ -241,6 +263,22 @@ case class Sum(child: Expression) extends PartialAggregate with trees.UnaryNode[
   }
 
   override def newInstance() = new SumFunction(child, this)
+}
+
+case class SumOfSquares(child: Expression) extends PartialAggregate with trees.UnaryNode[Expression] {
+  override def references = child.references
+  override def nullable = false
+  override def dataType = child.dataType
+  override def toString = s"SUM_OF_SQUARES($child)"
+
+  override def asPartial: SplitEvaluation = {
+    val partialSum = Alias(SumOfSquares(child), "PartialSumOfSquares")()
+    SplitEvaluation(
+      Sum(partialSum.toAttribute),
+      partialSum :: Nil)
+  }
+
+  override def newInstance() = new SumOfSquaresFunction(child, this)
 }
 
 case class SumDistinct(child: Expression)
@@ -353,6 +391,22 @@ case class SumFunction(expr: Expression, base: AggregateExpression) extends Aggr
   private val sum = MutableLiteral(zero.eval(null))
 
   private val addFunction = Add(sum, Coalesce(Seq(expr, zero)))
+
+  override def update(input: Row): Unit = {
+    sum.update(addFunction, input)
+  }
+
+  override def eval(input: Row): Any = sum.eval(null)
+}
+
+case class SumOfSquaresFunction(expr: Expression, base: AggregateExpression) extends AggregateFunction {
+  def this() = this(null, null) // Required for serialization.
+
+  private val zero = Cast(Literal(0), expr.dataType)
+
+  private val sum = MutableLiteral(zero.eval(null))
+
+  private val addFunction = Add(sum, Coalesce(Seq(Multiply(expr,expr), zero)))
 
   override def update(input: Row): Unit = {
     sum.update(addFunction, input)
