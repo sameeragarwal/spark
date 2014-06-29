@@ -240,10 +240,11 @@ case class ApproximateAverage(child: Expression) extends PartialAggregate with t
     val partialSumOfSquares = Alias(SumOfSquares(child), "PartialSumOfSquares")()
     val castedSum = Cast(Sum(partialSum.toAttribute), dataType)
     val castedCount = Cast(Sum(partialCount.toAttribute), dataType)
+    val castedSumOfSquares = Cast(Sum(partialSumOfSquares.toAttribute), dataType)
 
     SplitEvaluation(
       Divide(castedSum, castedCount),
-      partialCount :: partialSum :: Nil)
+      partialCount :: partialSum :: partialSumOfSquares :: Nil)
   }
 
   override def newInstance() = new AverageFunction(child, this)
