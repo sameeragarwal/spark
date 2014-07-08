@@ -35,7 +35,7 @@ private[spark] class ContinuousApproximateActionListener[T, U, R](
     func: (TaskContext, Iterator[T]) => U,
     evaluator: ApproximateEvaluator[U, R],
     timeout: Long)
-  extends JobListener {
+  extends JobListener with Logging {
 
   val startTime = System.currentTimeMillis()
   val totalTasks = rdd.partitions.size
@@ -63,6 +63,21 @@ private[spark] class ContinuousApproximateActionListener[T, U, R](
     }
   }
 
+  def getPartialResult(): PartialResult[R] = synchronized {
+    if (failure.isDefined) {
+      throw failure.get
+    } else if (finishedTasks == totalTasks) {
+      return new PartialResult(evaluator.currentResult(), true)
+    } else {
+      resultObject = Some(new PartialResult(evaluator.currentResult(), false))
+      return resultObject.getOrElse(null)
+    }
+  }
+
+  def isRunning() = {
+    finishedTasks < totalTasks
+  }
+
   /**
    * Waits for up to timeout milliseconds since the listener was created and then returns a
    * PartialResult with the result so far. This may be complete if the whole job is done.
@@ -74,12 +89,17 @@ private[spark] class ContinuousApproximateActionListener[T, U, R](
       if (failure.isDefined) {
         throw failure.get
       } else if (finishedTasks == totalTasks) {
+        //logInfo("Sameer: " + evaluator.currentResult())
         return new PartialResult(evaluator.currentResult(), true)
       } else if (time >= finishTime) {
         resultObject = Some(new PartialResult(evaluator.currentResult(), false))
+        //logInfo("Sameer: " + resultObject.get)
         return resultObject.get
       } else {
-        this.wait(finishTime - time)
+        //this.wait(finishTime - time)
+        resultObject = Some(new PartialResult(evaluator.currentResult(), false))
+        //logInfo("Sameer: " + resultObject.get)
+        this.wait(500)
       }
     }
     // Should never be reached, but required to keep the compiler happy

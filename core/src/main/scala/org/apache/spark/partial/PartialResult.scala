@@ -21,6 +21,7 @@ import org.apache.spark.annotation.Experimental
 
 @Experimental
 class PartialResult[R](initialVal: R, isFinal: Boolean) {
+  private var partialValue: Option[R] = Some(initialVal)
   private var finalValue: Option[R] = if (isFinal) Some(initialVal) else None
   private var failure: Option[Exception] = None
   private var completionHandler: Option[R => Unit] = None
@@ -112,6 +113,14 @@ class PartialResult[R](initialVal: R, isFinal: Boolean) {
       // Call the completion handler if it was set
       completionHandler.foreach(h => h(value))
       // Notify any threads that may be calling getFinalValue()
+      this.notifyAll()
+    }
+  }
+
+  private[spark] def setPartialValue(value: R) {
+    synchronized {
+      partialValue = Some(value)
+      // Notify any threads that may be calling getPartialValue()
       this.notifyAll()
     }
   }

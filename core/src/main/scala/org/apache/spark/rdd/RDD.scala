@@ -752,6 +752,14 @@ abstract class RDD[T: ClassTag](
   }
 
   /**
+   * Return an array that contains all of the elements in this RDD.
+   */
+  def partialCollect(): Array[T] = {
+    val results = sc.runPartialJob(this, (iter: Iterator[T]) => iter.toArray)
+    Array.concat(results: _*)
+  }
+
+  /**
    * Return an iterator that contains all of the elements in this RDD.
    *
    * The iterator will consume as much memory as the largest partition in this RDD.

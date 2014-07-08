@@ -77,6 +77,22 @@ class DoubleRDDFunctions(self: RDD[Double]) extends Logging with Serializable {
 
   /**
    * :: Experimental ::
+   * Approximate operation to return the mean within a timeout.
+   */
+  @Experimental
+  def continuousMeanApprox(timeout: Long, confidence: Double = 0.95) = {
+    val processPartition = (ctx: TaskContext, ns: Iterator[Double]) => StatCounter(ns)
+    val evaluator = new MeanEvaluator(self.partitions.size, confidence)
+    val listener = self.context.runContinuousApproximateJob(self, processPartition, evaluator, timeout)
+    while(listener.isRunning()) {
+      println(listener.getPartialResult())
+      Thread.sleep(1000)
+    }
+    listener.awaitResult()
+  }
+
+  /**
+   * :: Experimental ::
    * Approximate operation to return the sum within a timeout.
    */
   @Experimental

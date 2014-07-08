@@ -1068,6 +1068,31 @@ class SparkContext(config: SparkConf) extends Logging {
   }
 
   /**
+   * Run a function on a given set of partitions in an RDD and pass the results to the given
+   * handler function. This is the main entry point for all actions in Spark. The allowLocal
+   * flag specifies whether the scheduler can run the computation on the driver rather than
+   * shipping it out to the cluster, for short actions like first().
+   */
+  def runPartialJob[T, U: ClassTag](
+                              rdd: RDD[T],
+                              func: (TaskContext, Iterator[T]) => U,
+                              partitions: Seq[Int],
+                              allowLocal: Boolean,
+                              resultHandler: (Int, U) => Unit) {
+    if (dagScheduler == null) {
+      throw new SparkException("SparkContext has been shutdown")
+    }
+    val callSite = getCallSite
+    val cleanedFunc = clean(func)
+    logInfo("Starting job: " + callSite.short)
+    val start = System.nanoTime
+    dagScheduler.runPartialJob(rdd, cleanedFunc, partitions, callSite, allowLocal,
+      resultHandler, localProperties.get)
+    logInfo("Job finished: " + callSite.short + ", took " + (System.nanoTime - start) / 1e9 + " s")
+    rdd.doCheckpoint()
+  }
+
+  /**
    * Run a function on a given set of partitions in an RDD and return the results as an array. The
    * allowLocal flag specifies whether the scheduler can run the computation on the driver rather
    * than shipping it out to the cluster, for short actions like first().
@@ -1093,6 +1118,19 @@ class SparkContext(config: SparkConf) extends Logging {
       partitions: Seq[Int],
       allowLocal: Boolean
       ): Array[U] = {
+    runPartialJob(rdd, (context: TaskContext, iter: Iterator[T]) => func(iter), partitions, allowLocal)
+  }
+
+  /**
+   * Run a job on a given set of partitions of an RDD, but take a function of type
+   * `Iterator[T] => U` instead of `(TaskContext, Iterator[T]) => U`.
+   */
+  def runPartialJob[T, U: ClassTag](
+                              rdd: RDD[T],
+                              func: Iterator[T] => U,
+                              partitions: Seq[Int],
+                              allowLocal: Boolean
+                              ): Array[U] = {
     runJob(rdd, (context: TaskContext, iter: Iterator[T]) => func(iter), partitions, allowLocal)
   }
 
@@ -1108,6 +1146,13 @@ class SparkContext(config: SparkConf) extends Logging {
    */
   def runJob[T, U: ClassTag](rdd: RDD[T], func: Iterator[T] => U): Array[U] = {
     runJob(rdd, func, 0 until rdd.partitions.size, false)
+  }
+
+  /**
+   * Run a job on all partitions in an RDD and return the results in an array.
+   */
+  def runPartialJob[T, U: ClassTag](rdd: RDD[T], func: Iterator[T] => U): Array[U] = {
+    runPartialJob(rdd, func, 0 until rdd.partitions.size, false)
   }
 
   /**
@@ -1147,6 +1192,25 @@ class SparkContext(config: SparkConf) extends Logging {
     logInfo("Starting job: " + callSite.short)
     val start = System.nanoTime
     val result = dagScheduler.runApproximateJob(rdd, func, evaluator, callSite, timeout,
+      localProperties.get)
+    logInfo("Job finished: " + callSite.short + ", took " + (System.nanoTime - start) / 1e9 + " s")
+    result
+  }
+
+  /**
+   * :: DeveloperApi ::
+   * Run a job that can return approximate results.
+   */
+  @DeveloperApi
+  def runContinuousApproximateJob[T, U, R](
+                                  rdd: RDD[T],
+                                  func: (TaskContext, Iterator[T]) => U,
+                                  evaluator: ApproximateEvaluator[U, R],
+                                  timeout: Long) = {
+    val callSite = getCallSite
+    logInfo("Starting job: " + callSite.short)
+    val start = System.nanoTime
+    val result = dagScheduler.runContinuousApproximateJob(rdd, func, evaluator, callSite, timeout,
       localProperties.get)
     logInfo("Job finished: " + callSite.short + ", took " + (System.nanoTime - start) / 1e9 + " s")
     result

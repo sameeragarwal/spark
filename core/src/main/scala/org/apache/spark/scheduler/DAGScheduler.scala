@@ -35,7 +35,7 @@ import akka.util.Timeout
 
 import org.apache.spark._
 import org.apache.spark.executor.TaskMetrics
-import org.apache.spark.partial.{ApproximateActionListener, ApproximateEvaluator, PartialResult}
+import org.apache.spark.partial.{ContinuousApproximateActionListener, ApproximateActionListener, ApproximateEvaluator, PartialResult}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.storage.{BlockId, BlockManager, BlockManagerMaster, RDDBlockId}
 import org.apache.spark.util.{CallSite, SystemClock, Clock, Utils}
@@ -459,6 +459,25 @@ class DAGScheduler(
     }
   }
 
+  def runPartialJob[T, U: ClassTag](
+                              rdd: RDD[T],
+                              func: (TaskContext, Iterator[T]) => U,
+                              partitions: Seq[Int],
+                              callSite: CallSite,
+                              allowLocal: Boolean,
+                              resultHandler: (Int, U) => Unit,
+                              properties: Properties = null)
+  {
+    val waiter = submitJob(rdd, func, partitions, callSite, allowLocal, resultHandler, properties)
+    waiter.awaitResult() match {
+      case JobSucceeded => {}
+      case JobFailed(exception: Exception) =>
+        logInfo("Failed to run " + callSite.short)
+        throw exception
+    }
+  }
+
+
   def runApproximateJob[T, U, R](
       rdd: RDD[T],
       func: (TaskContext, Iterator[T]) => U,
@@ -475,6 +494,30 @@ class DAGScheduler(
     eventProcessActor ! JobSubmitted(
       jobId, rdd, func2, partitions, allowLocal = false, callSite, listener, properties)
     listener.awaitResult()    // Will throw an exception if the job fails
+  }
+
+  def runContinuousApproximateJob[T, U, R](
+      rdd: RDD[T],
+      func: (TaskContext, Iterator[T]) => U,
+      evaluator: ApproximateEvaluator[U, R],
+      callSite: CallSite,
+      timeout: Long,
+      properties: Properties = null)
+    =
+  {
+    val listener = new ContinuousApproximateActionListener(rdd, func, evaluator, timeout)
+    val func2 = func.asInstanceOf[(TaskContext, Iterator[_]) => _]
+    val partitions = (0 until rdd.partitions.size).toArray
+    val jobId = nextJobId.getAndIncrement()
+    eventProcessActor ! JobSubmitted(
+      jobId, rdd, func2, partitions, allowLocal = false, callSite, listener, properties)
+    //val timeout2 = timeout.milliseconds.fromNow
+    //while(timeout2.hasTimeLeft()) {
+    //    logInfo("Sameer: " + listener.getPartialResult().toString)
+    //  this.wait(10)
+    //}
+    //listener.awaitResult()
+    listener
   }
 
   /**
