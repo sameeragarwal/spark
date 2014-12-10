@@ -1118,6 +1118,7 @@ class SparkContext(config: SparkConf) extends Logging {
       partitions: Seq[Int],
       allowLocal: Boolean
       ): Array[U] = {
+/*
     runPartialJob(rdd, (context: TaskContext, iter: Iterator[T]) => func(iter), partitions, allowLocal)
   }
 
@@ -1131,6 +1132,7 @@ class SparkContext(config: SparkConf) extends Logging {
                               partitions: Seq[Int],
                               allowLocal: Boolean
                               ): Array[U] = {
+*/
     runJob(rdd, (context: TaskContext, iter: Iterator[T]) => func(iter), partitions, allowLocal)
   }
 
@@ -1151,9 +1153,11 @@ class SparkContext(config: SparkConf) extends Logging {
   /**
    * Run a job on all partitions in an RDD and return the results in an array.
    */
+/*
   def runPartialJob[T, U: ClassTag](rdd: RDD[T], func: Iterator[T] => U): Array[U] = {
     runPartialJob(rdd, func, 0 until rdd.partitions.size, false)
   }
+*/
 
   /**
    * Run a job on all partitions in an RDD and pass the results to a handler function.
