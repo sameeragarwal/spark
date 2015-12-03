@@ -24,6 +24,7 @@ import org.apache.spark.sql.catalyst.planning._
 import org.apache.spark.sql.catalyst.plans._
 import org.apache.spark.sql.catalyst.plans.logical.{BroadcastHint, LogicalPlan}
 import org.apache.spark.sql.catalyst.plans.physical._
+import org.apache.spark.sql.execution.adaptive.LogicalRDDWithSatistics
 import org.apache.spark.sql.execution.columnar.{InMemoryColumnarTableScan, InMemoryRelation}
 import org.apache.spark.sql.execution.datasources.{CreateTableUsing, CreateTempTableUsing, DescribeCommand => LogicalDescribeCommand, _}
 import org.apache.spark.sql.execution.{DescribeCommand => RunnableDescribeCommand}
@@ -364,6 +365,8 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
       case e @ EvaluatePython(udf, child, _) =>
         BatchPythonEvaluation(udf, e.output, planLater(child)) :: Nil
       case LogicalRDD(output, rdd) => PhysicalRDD(output, rdd, "PhysicalRDD") :: Nil
+      case LogicalRDDWithSatistics(output, _, rdd) =>
+        PhysicalRDD(output, rdd, "PhysicalRDD") :: Nil
       case BroadcastHint(child) => apply(child)
       case _ => Nil
     }
