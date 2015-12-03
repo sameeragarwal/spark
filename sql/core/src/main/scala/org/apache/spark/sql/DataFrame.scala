@@ -129,6 +129,21 @@ class DataFrame private[sql](
   def this(sqlContext: SQLContext, logicalPlan: LogicalPlan) = {
     this(sqlContext, {
       val qe = sqlContext.executePlan(logicalPlan)
+      System.out.println("-----------------------------------------------")
+      System.out.println("-----------------------------------------------")
+      System.out.println(s"Query: ${qe.simpleString}")
+      System.out.println("-----------------------------------------------")
+      System.out.println(s"Analyzed Plan: ${qe.analyzed}")
+      System.out.println("-----------------------------------------------")
+      System.out.println(s"Executed Plan: ${qe.executedPlan}")
+      System.out.println("-----------------------------------------------")
+      System.out.println(s"Logical Plan: ${qe.logical}")
+      System.out.println("-----------------------------------------------")
+      System.out.println(s"Optimized Plan: ${qe.optimizedPlan}")
+      System.out.println("-----------------------------------------------")
+      System.out.println(s"Spark Plan: ${qe.sparkPlan}")
+      System.out.println("-----------------------------------------------")
+      System.out.println("-----------------------------------------------")
       if (sqlContext.conf.dataFrameEagerAnalysis) {
         qe.assertAnalyzed()  // This should force analysis and throw errors if there are any
       }
