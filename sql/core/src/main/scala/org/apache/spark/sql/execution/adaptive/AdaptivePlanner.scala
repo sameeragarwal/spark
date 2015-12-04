@@ -1,13 +1,30 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.sql.execution.adaptive
 
 import org.apache.spark.sql.{SQLContext, Strategy}
 import org.apache.spark.sql.catalyst.CatalystConf
 import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.planning.QueryPlanner
-import org.apache.spark.sql.catalyst.plans.logical.{LeafNode, LogicalPlan}
+import org.apache.spark.sql.catalyst.plans.logical.{UnaryNode, LeafNode, LogicalPlan}
 import org.apache.spark.sql.catalyst.plans.physical.UnspecifiedDistribution
 import org.apache.spark.sql.catalyst.rules.{Rule, RuleExecutor}
-import org.apache.spark.sql.execution.{EnsureRequirements, SparkPlan}
+import org.apache.spark.sql.execution.{Exchange, EnsureRequirements, SparkPlan}
 
 class AdaptivePlanner(
     conf: CatalystConf,
@@ -21,99 +38,41 @@ class AdaptivePlanner(
   )
 
   object PlanNext extends Rule[LogicalPlan] {
-    private[this] def shouldPlan(plan: LogicalPlan): Boolean = {
-      plan.children.forall {
-        case p: PipelineLogicalPlan => true
-        case _ => false
-      }
-    }
-
     private[this] val ensureRequirements = EnsureRequirements(sqlContext)
 
-    def apply(plan: LogicalPlan): LogicalPlan = plan transformUp {
-      case p if shouldPlan(p) =>
-        // At here, we assume that planner can take out the sparkPlan
-        // in a ExecutedLogicalPlan. So, we can just plan the given p.
-        val planned = planner.plan(p).next()
-        val hasRequiredDistribution = planned.requiredChildDistribution.exists {
-          case UnspecifiedDistribution => false
-          case _ => true
-        }
-
-        // If the SparkPlan "planned" supports adaptive execution.
-        // TODO: We should not use true at here.
-        val supportsAdaptiveExecution = true
-
-        if (hasRequiredDistribution && supportsAdaptiveExecution) {
-          // We create a single coordinator and use it to fill in the children
-          // of the logicalPlan p.
-          val coordinator = ExchangeCoordinator(planned.children)
-          val newChildren = p.children.map(_ => coordinator)
-          p.withNewChildren(newChildren)
-        } else {
-          val hasRequiredOrdering = planned.requiredChildOrdering.exists(_.nonEmpty)
-
-          val withDataMovement = if (hasRequiredDistribution || hasRequiredOrdering) {
-            // Add exchange/sort
-            ensureRequirements.apply(planned)
-          } else {
-            planned
+    def apply(plan: LogicalPlan): LogicalPlan = {
+      var shouldContinue = true
+      plan transformUp {
+        case p if shouldContinue =>
+          // At here, we assume that planner can take out the sparkPlan
+          // in a ExecutedLogicalPlan. So, we can just plan the given p.
+          val planned = planner.plan(p).next()
+          val withDataMovements = ensureRequirements.apply(planned)
+          assert(p.children.length == withDataMovements.children.length)
+          val newChildren = p.children.zip(withDataMovements.children).map {
+            case (logicalChild, e: Exchange) =>
+              BoundaryLogicalPlan(e)
+            case (logicalChild, physicalChild) =>
+              val hasExchange = physicalChild.find {
+                case e: Exchange => true
+                case _ => false
+              }.isDefined
+              assert(!hasExchange)
+              logicalChild
           }
-          // Transform p to a PipelineLogicalPlan.
-          PipelineLogicalPlan(withDataMovement)
-        }
+
+          if (newChildren.exists(_.isInstanceOf[BoundaryLogicalPlan])) {
+            shouldContinue = false
+          }
+
+          p.withNewChildren(newChildren)
+      }
     }
   }
 }
 
-case class AdaptiveStrategy(planner: QueryPlanner[SparkPlan]) extends Strategy {
-  private[this] def parentOfExchangeCoordinator(plan: LogicalPlan): Boolean = {
-    val ret = plan.children.nonEmpty && plan.children.forall(_.isInstanceOf[ExchangeCoordinator])
-    if (!ret) {
-      assert(plan.children.exists(_.isInstanceOf[ExchangeCoordinator]))
-    }
-
-    ret
-  }
-
-  def apply(logicalPlan: LogicalPlan): Seq[SparkPlan] = logicalPlan match {
-    case PipelineLogicalPlan(alreadyPlanned) => alreadyPlanned :: Nil
-    case p if parentOfExchangeCoordinator(p) =>
-      val coordinator = p.children.head.asInstanceOf[ExchangeCoordinator]
-      planner.plan(p.withNewChildren(coordinator.expand())).toSeq
-  }
-}
-
-// TODO: Probably we can avoid this by just add a flag in a logicalPlan
-// so we can know if a logicalPlan has been visited by AdaptivePlanner.
-private[sql] case class PipelineLogicalPlan(alreadyPlanned: SparkPlan)
+private[sql] case class BoundaryLogicalPlan(exchange: Exchange)
   extends LeafNode {
 
-  override def output: Seq[Attribute] = alreadyPlanned.output
-}
-
-case class ExchangeCoordinator(plansForExecution: Seq[SparkPlan]) extends LeafNode {
-  override def output: Seq[Attribute] = Nil
-
-  var executed: Boolean = false
-
-  var executedPlan: Seq[SparkPlan] = Nil
-
-  def expand(): Seq[PipelineLogicalPlan] = {
-    if (executed) {
-      executedPlan.map(PipelineLogicalPlan)
-    } else {
-      throw new IllegalStateException("expand should not be called when executed it false.")
-    }
-  }
-
-  def execute(): Unit = {
-    if (!executed) {
-      // We need to first submit plansForExecution and then determine how to shuffle data.
-      // Finally, we create Shuffled RDDs to fetch data at the reducer side,
-      // and wrap these RDDs in PhysicalRDDs (these are stored in executedPlan).
-
-      executed = true
-    }
-  }
+  override def output: Seq[Attribute] = exchange.output
 }
