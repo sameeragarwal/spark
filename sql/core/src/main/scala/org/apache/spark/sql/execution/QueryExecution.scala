@@ -82,18 +82,7 @@ class QueryExecution(val sqlContext: SQLContext, val logical: LogicalPlan) {
 
   // executedPlan should not be used to initialize any SparkPlan. It should be
   // only used for execution.
-  lazy val executedPlan: SparkPlan = {
-    val plan = sqlContext.prepareForExecution.execute(sparkPlan) transform {
-      case PhysicalRDDWithPartitioning(sparkPlan, _, _) =>
-        sparkPlan
-    }
-
-    println("=================================================")
-    println("All executed physcial plan nodes")
-    println(plan)
-
-    plan
-  }
+  lazy val executedPlan: SparkPlan = sqlContext.prepareForExecution.execute(sparkPlan)
 
   /** Internal version of the RDD. Avoids copies and has no schema */
   lazy val toRdd: RDD[InternalRow] = executedPlan.execute()
