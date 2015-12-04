@@ -21,6 +21,7 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SQLContext
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.execution.adaptive.AdaptivePlanner
 
 /**
  * The primary workflow for executing relational queries using Spark.  Designed to allow easy
@@ -33,6 +34,8 @@ class QueryExecution(val sqlContext: SQLContext, val logical: LogicalPlan) {
 
   def assertAnalyzed(): Unit = sqlContext.analyzer.checkAnalysis(analyzed)
 
+  lazy val adaptivePlanner: AdaptivePlanner = new AdaptivePlanner(sqlContext)
+
   lazy val analyzed: LogicalPlan = sqlContext.analyzer.execute(logical)
 
   lazy val withCachedData: LogicalPlan = {
@@ -41,6 +44,8 @@ class QueryExecution(val sqlContext: SQLContext, val logical: LogicalPlan) {
   }
 
   lazy val optimizedPlan: LogicalPlan = sqlContext.optimizer.execute(withCachedData)
+
+  var currentLogicalPlan: LogicalPlan = optimizedPlan
 
   lazy val sparkPlan: SparkPlan = {
     SQLContext.setActive(sqlContext)
