@@ -34,6 +34,8 @@ class QueryExecution(val sqlContext: SQLContext, val logical: LogicalPlan) {
 
   def assertAnalyzed(): Unit = sqlContext.analyzer.checkAnalysis(analyzed)
 
+  lazy val adaptivePlanner: AdaptivePlanner = new AdaptivePlanner(sqlContext)
+
   lazy val analyzed: LogicalPlan = sqlContext.analyzer.execute(logical)
 
   lazy val withCachedData: LogicalPlan = {
@@ -42,6 +44,8 @@ class QueryExecution(val sqlContext: SQLContext, val logical: LogicalPlan) {
   }
 
   lazy val optimizedPlan: LogicalPlan = sqlContext.optimizer.execute(withCachedData)
+
+  var currentLogicalPlan: LogicalPlan = optimizedPlan
 
   lazy val sparkPlan: SparkPlan = {
     SQLContext.setActive(sqlContext)
