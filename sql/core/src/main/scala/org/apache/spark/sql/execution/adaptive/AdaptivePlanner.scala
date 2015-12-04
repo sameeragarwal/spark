@@ -1,6 +1,6 @@
 package org.apache.spark.sql.execution.adaptive
 
-import org.apache.spark.sql.{SQLContext, Strategy}
+import org.apache.spark.sql.{Strategy, SQLContext}
 import org.apache.spark.sql.catalyst.CatalystConf
 import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.planning.QueryPlanner
@@ -10,12 +10,12 @@ import org.apache.spark.sql.catalyst.rules.{Rule, RuleExecutor}
 import org.apache.spark.sql.execution.{EnsureRequirements, SparkPlan}
 
 class AdaptivePlanner(
-    conf: CatalystConf,
-    planner: QueryPlanner[SparkPlan],
     sqlContext: SQLContext,
     maxIterations: Int = 100)
   extends RuleExecutor[LogicalPlan] {
 
+  lazy val conf: CatalystConf = sqlContext.conf
+  lazy val planner: QueryPlanner[SparkPlan] = sqlContext.planner
   lazy val batches: Seq[Batch] = Seq(
     Batch("Plan", Once, PlanNext)
   )
