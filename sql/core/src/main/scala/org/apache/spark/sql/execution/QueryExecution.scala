@@ -21,7 +21,7 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SQLContext
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
-import org.apache.spark.sql.execution.adaptive.AdaptivePlanner
+import org.apache.spark.sql.execution.adaptive.{PhysicalRDDWithPartitioning, AdaptivePlanner}
 
 /**
  * The primary workflow for executing relational queries using Spark.  Designed to allow easy
@@ -47,14 +47,53 @@ class QueryExecution(val sqlContext: SQLContext, val logical: LogicalPlan) {
 
   var currentLogicalPlan: LogicalPlan = optimizedPlan
 
+  def planWithAdaptivePlanner(): Unit = {
+    SQLContext.setActive(sqlContext)
+    var continue = true
+    var i = 0
+    while (continue) {
+      println("current logical plan at iteration " + i)
+      println(currentLogicalPlan)
+      println("=================================================")
+      val newLogicalPlan = adaptivePlanner.execute(currentLogicalPlan)
+      if (currentLogicalPlan != newLogicalPlan) {
+        val newOptimizedPlan = sqlContext.optimizer.execute(newLogicalPlan)
+        currentLogicalPlan =
+          org.apache.spark.sql.execution.adaptive.Utils.runSubtree(newOptimizedPlan, sqlContext)
+      } else {
+        continue = false
+      }
+      i += 1
+    }
+  }
+
   lazy val sparkPlan: SparkPlan = {
     SQLContext.setActive(sqlContext)
-    sqlContext.planner.plan(optimizedPlan).next()
+    if (sqlContext.conf.getConfString("spark.sql.useAdaptivePlanner", "false").toBoolean) {
+      planWithAdaptivePlanner()
+      println("The last piece of logical plan ")
+      println(currentLogicalPlan)
+      println("=================================================")
+      sqlContext.planner.plan(currentLogicalPlan).next()
+    } else {
+      sqlContext.planner.plan(optimizedPlan).next()
+    }
   }
 
   // executedPlan should not be used to initialize any SparkPlan. It should be
   // only used for execution.
-  lazy val executedPlan: SparkPlan = sqlContext.prepareForExecution.execute(sparkPlan)
+  lazy val executedPlan: SparkPlan = {
+    val plan = sqlContext.prepareForExecution.execute(sparkPlan) transform {
+      case PhysicalRDDWithPartitioning(sparkPlan, _, _) =>
+        sparkPlan
+    }
+
+    println("=================================================")
+    println("All executed physcial plan nodes")
+    println(plan)
+
+    plan
+  }
 
   /** Internal version of the RDD. Avoids copies and has no schema */
   lazy val toRdd: RDD[InternalRow] = executedPlan.execute()

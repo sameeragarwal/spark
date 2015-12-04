@@ -129,7 +129,7 @@ class DataFrame private[sql](
   def this(sqlContext: SQLContext, logicalPlan: LogicalPlan) = {
     this(sqlContext, {
       val qe = sqlContext.executePlan(logicalPlan)
-      System.out.println(qe.toString)
+      // System.out.println(qe.toString)
       if (sqlContext.conf.dataFrameEagerAnalysis) {
         qe.assertAnalyzed()  // This should force analysis and throw errors if there are any
       }

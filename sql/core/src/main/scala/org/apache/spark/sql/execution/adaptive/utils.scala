@@ -17,25 +17,50 @@
 
 package org.apache.spark.sql.execution.adaptive
 
+
+import scala.collection.JavaConverters._
+
 import java.util.{HashMap => JHashMap}
 
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.analysis.MultiInstanceRelation
 import org.apache.spark.sql.catalyst.expressions.Attribute
+import org.apache.spark.sql.catalyst.plans.logical.LeafNode
 import org.apache.spark.sql.catalyst.plans.logical.{LeafNode, Statistics, LogicalPlan}
+import org.apache.spark.sql.catalyst.plans.physical.Partitioning
 import org.apache.spark.{MapOutputStatistics, SimpleFutureAction, ShuffleDependency}
-import org.apache.spark.sql.SQLContext
+import org.apache.spark.sql.{execution, SQLContext}
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.execution.{ShuffledRowRDD, Exchange}
+import org.apache.spark.sql.execution.{SparkPlan, ShuffledRowRDD, Exchange}
 
 object Utils {
-  def runFragment(exchanges: Array[Exchange], sqlContext: SQLContext): Unit = {
+  def runSubtree(partiallyPlanned: LogicalPlan, sqlContext: SQLContext): LogicalPlan = {
+    // Get all BoundaryLogicalPlans.
+    val boundaries = partiallyPlanned.collect {
+      case b: BoundaryLogicalPlan => b
+    }
+
+    // Run those BoundaryLogicalPlans.
+    val boundaryToLogicalRDD = runFragment(boundaries.toArray, sqlContext)
+
+    // Replace BoundaryLogicalPlans to LogicalRDDWithSatistics.
+    partiallyPlanned transformUp {
+      case b: BoundaryLogicalPlan => boundaryToLogicalRDD(b)
+    }
+  }
+
+  def runFragment(
+      boundaries: Array[BoundaryLogicalPlan],
+      sqlContext: SQLContext): Map[BoundaryLogicalPlan, LogicalRDDWithSatistics] = {
+    val exchanges = boundaries.map(_.exchange)
+    exchanges.foreach(println)
+
     val shuffleDependencies =
       new Array[ShuffleDependency[Int, InternalRow, InternalRow]](exchanges.length)
     val submittedStageFutures =
       new Array[Option[SimpleFutureAction[MapOutputStatistics]]](exchanges.length)
 
-    // Step 1: Get all shuffle dependencies and subtmit them to DAG scheduler.
+    // Step 1: Get all shuffle dependencies and submit them to DAG scheduler.
     var i = 0
     while (i < exchanges.length) {
       val exchange = exchanges(i)
@@ -64,7 +89,8 @@ object Utils {
 
     // Step 3: Wrap the shuffled RDD in a logical plan and then create a map from
     // an exchange to its corresponding logical plan.
-    val newPostShuffleRDDs = new JHashMap[Exchange, LogicalRDDWithSatistics](exchanges.length)
+    val newPostShuffleRDDs =
+      new JHashMap[BoundaryLogicalPlan, LogicalRDDWithSatistics](exchanges.length)
     var k = 0
     while (k < exchanges.length) {
       val exchange = exchanges(k)
@@ -72,13 +98,15 @@ object Utils {
         exchange.preparePostShuffleRDD(shuffleDependencies(k))
       val logicalPlan =
         LogicalRDDWithSatistics(
-          exchange.output,
+          exchange,
           mapOutputStatistics(k).map(_.bytesByPartitionId),
           rdd)
-      newPostShuffleRDDs.put(exchange, logicalPlan)
+      newPostShuffleRDDs.put(boundaries(k), logicalPlan)
 
       k += 1
     }
+
+    newPostShuffleRDDs.asScala.toMap
   }
 }
 
@@ -88,14 +116,22 @@ object Utils {
  * the total size of this RDD is 0 byte.
  */
 private[sql] case class LogicalRDDWithSatistics(
-    output: Seq[Attribute],
+    sparkPlan: SparkPlan,
     bytesByPartitionId: Option[Array[Long]],
     rdd: RDD[InternalRow])
   extends LeafNode with MultiInstanceRelation {
 
+  override val output: Seq[Attribute] = sparkPlan.output
+
+  // val outputsUnsafeRows: Boolean = sparkPlan.outputsUnsafeRows
+
+  // val outputPartitioning: Partitioning = sparkPlan.outputPartitioning
+
   override def newInstance(): LogicalRDDWithSatistics.this.type =
     LogicalRDDWithSatistics(
-      output.map(_.newInstance()), bytesByPartitionId, rdd).asInstanceOf[this.type]
+      sparkPlan,
+      bytesByPartitionId,
+      rdd).asInstanceOf[this.type]
 
   override def sameResult(plan: LogicalPlan): Boolean = plan match {
     case LogicalRDDWithSatistics(_, _, otherRDD) => rdd.id == otherRDD.id
@@ -108,4 +144,22 @@ private[sql] case class LogicalRDDWithSatistics(
       case None => BigInt(0L)
     }
   )
+}
+
+/** Physical plan node for scanning data from an RDD. */
+private[sql] case class PhysicalRDDWithPartitioning(
+    sparkPlan: SparkPlan,
+    rdd: RDD[InternalRow],
+    extraInformation: String)
+  extends execution.LeafNode {
+
+  override val output: Seq[Attribute] = sparkPlan.output
+
+  override val outputPartitioning: Partitioning = sparkPlan.outputPartitioning
+
+  override val outputsUnsafeRows: Boolean = sparkPlan.outputsUnsafeRows
+
+  protected override def doExecute(): RDD[InternalRow] = rdd
+
+  override def simpleString: String = "Scan " + extraInformation + output.mkString("[", ",", "]")
 }
