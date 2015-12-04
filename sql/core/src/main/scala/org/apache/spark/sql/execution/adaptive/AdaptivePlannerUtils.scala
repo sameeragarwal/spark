@@ -17,23 +17,21 @@
 
 package org.apache.spark.sql.execution.adaptive
 
-
-import scala.collection.JavaConverters._
-
 import java.util.{HashMap => JHashMap}
 
 import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.MultiInstanceRelation
 import org.apache.spark.sql.catalyst.expressions.Attribute
-import org.apache.spark.sql.catalyst.plans.logical.LeafNode
-import org.apache.spark.sql.catalyst.plans.logical.{LeafNode, Statistics, LogicalPlan}
+import org.apache.spark.sql.catalyst.plans.logical.{LeafNode, LogicalPlan, Statistics}
 import org.apache.spark.sql.catalyst.plans.physical.Partitioning
-import org.apache.spark.{MapOutputStatistics, SimpleFutureAction, ShuffleDependency}
-import org.apache.spark.sql.{execution, SQLContext}
-import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.execution.{SparkPlan, ShuffledRowRDD, Exchange}
+import org.apache.spark.sql.execution.SparkPlan
+import org.apache.spark.sql.{SQLContext, execution}
+import org.apache.spark.{MapOutputStatistics, ShuffleDependency, SimpleFutureAction}
 
-object Utils {
+import scala.collection.JavaConverters._
+
+object AdaptivePlannerUtils {
   def runSubtree(partiallyPlanned: LogicalPlan, sqlContext: SQLContext): LogicalPlan = {
     // Get all BoundaryLogicalPlans.
     val boundaries = partiallyPlanned.collect {
@@ -43,7 +41,7 @@ object Utils {
     // Run those BoundaryLogicalPlans.
     val boundaryToLogicalRDD = runFragment(boundaries.toArray, sqlContext)
 
-    // Replace BoundaryLogicalPlans to LogicalRDDWithSatistics.
+    // Replace BoundaryLogicalPlans to LogicalRDDWithStatistics.
     partiallyPlanned transformUp {
       case b: BoundaryLogicalPlan => boundaryToLogicalRDD(b)
     }
@@ -51,7 +49,7 @@ object Utils {
 
   def runFragment(
       boundaries: Array[BoundaryLogicalPlan],
-      sqlContext: SQLContext): Map[BoundaryLogicalPlan, LogicalRDDWithSatistics] = {
+      sqlContext: SQLContext): Map[BoundaryLogicalPlan, LogicalRDDWithStatistics] = {
     val exchanges = boundaries.map(_.exchange)
     exchanges.foreach(println)
 
@@ -90,14 +88,14 @@ object Utils {
     // Step 3: Wrap the shuffled RDD in a logical plan and then create a map from
     // an exchange to its corresponding logical plan.
     val newPostShuffleRDDs =
-      new JHashMap[BoundaryLogicalPlan, LogicalRDDWithSatistics](exchanges.length)
+      new JHashMap[BoundaryLogicalPlan, LogicalRDDWithStatistics](exchanges.length)
     var k = 0
     while (k < exchanges.length) {
       val exchange = exchanges(k)
       val rdd =
         exchange.preparePostShuffleRDD(shuffleDependencies(k))
       val logicalPlan =
-        LogicalRDDWithSatistics(
+        LogicalRDDWithStatistics(
           exchange,
           mapOutputStatistics(k).map(_.bytesByPartitionId),
           rdd)
@@ -115,7 +113,7 @@ object Utils {
  * statistics of this RDD `bytesByPartitionId`. If `bytesByPartitionId` is not defined,
  * the total size of this RDD is 0 byte.
  */
-private[sql] case class LogicalRDDWithSatistics(
+private[sql] case class LogicalRDDWithStatistics(
     sparkPlan: SparkPlan,
     bytesByPartitionId: Option[Array[Long]],
     rdd: RDD[InternalRow])
@@ -127,14 +125,14 @@ private[sql] case class LogicalRDDWithSatistics(
 
   // val outputPartitioning: Partitioning = sparkPlan.outputPartitioning
 
-  override def newInstance(): LogicalRDDWithSatistics.this.type =
-    LogicalRDDWithSatistics(
+  override def newInstance(): LogicalRDDWithStatistics.this.type =
+    LogicalRDDWithStatistics(
       sparkPlan,
       bytesByPartitionId,
       rdd).asInstanceOf[this.type]
 
   override def sameResult(plan: LogicalPlan): Boolean = plan match {
-    case LogicalRDDWithSatistics(_, _, otherRDD) => rdd.id == otherRDD.id
+    case LogicalRDDWithStatistics(_, _, otherRDD) => rdd.id == otherRDD.id
     case _ => false
   }
 

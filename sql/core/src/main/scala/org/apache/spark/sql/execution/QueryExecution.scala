@@ -21,7 +21,7 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SQLContext
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
-import org.apache.spark.sql.execution.adaptive.{PhysicalRDDWithPartitioning, AdaptivePlanner}
+import org.apache.spark.sql.execution.adaptive.{AdaptivePlanner, AdaptivePlannerUtils}
 
 /**
  * The primary workflow for executing relational queries using Spark.  Designed to allow easy
@@ -58,8 +58,7 @@ class QueryExecution(val sqlContext: SQLContext, val logical: LogicalPlan) {
       val newLogicalPlan = adaptivePlanner.execute(currentLogicalPlan)
       if (currentLogicalPlan != newLogicalPlan) {
         val newOptimizedPlan = sqlContext.optimizer.execute(newLogicalPlan)
-        currentLogicalPlan =
-          org.apache.spark.sql.execution.adaptive.Utils.runSubtree(newOptimizedPlan, sqlContext)
+        currentLogicalPlan = AdaptivePlannerUtils.runSubtree(newOptimizedPlan, sqlContext)
       } else {
         continue = false
       }
