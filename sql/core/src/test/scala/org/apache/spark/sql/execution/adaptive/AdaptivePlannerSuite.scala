@@ -47,7 +47,7 @@ class AdaptivePlannerSuite extends QueryTest with SQLTestUtils with SharedSQLCon
     }
   }
 
-  test("adaptive query optimization: join") {
+  test("adaptive query optimization: join reordering") {
     withSQLConf("spark.sql.useAdaptivePlanner" -> "true") {
       Seq(1, 2, 3).map(i => (i, i.toString)).toDF("int", "str").registerTempTable("df")
 
@@ -60,4 +60,33 @@ class AdaptivePlannerSuite extends QueryTest with SQLTestUtils with SharedSQLCon
       checkAnswer(sql(query), Row("1", "1") :: Row("2", "2") :: Row("3", "3") :: Nil)
     }
   }
+
+  test("adaptive query optimization: broadcast join on string key") {
+    withSQLConf("spark.sql.useAdaptivePlanner" -> "true") {
+      Seq(1, 2, 3, 4).map(i => (i, i.toString)).toDF("int", "str").registerTempTable("df1")
+      Seq(1, 3).map(i => (i, i.toString)).toDF("int", "str").registerTempTable("df2")
+      val query =
+        """
+          |SELECT x.str, y.str
+          |FROM df1 x JOIN df2 y ON x.str = y.str
+        """.stripMargin
+
+      checkAnswer(sql(query), Row("1", "1") :: Row("3", "3") :: Nil)
+    }
+  }
+
+  test("adaptive query optimization: broadcast join on int key") {
+    withSQLConf("spark.sql.useAdaptivePlanner" -> "true") {
+      Seq(1, 2, 3, 4).map(i => (i, i.toString)).toDF("int", "str").registerTempTable("df1")
+      Seq(1, 3).map(i => (i, i.toString)).toDF("int", "str").registerTempTable("df2")
+      val query =
+        """
+          |SELECT x.str, y.str
+          |FROM df1 x JOIN df2 y ON x.int = y.int
+        """.stripMargin
+
+      checkAnswer(sql(query), Row("1", "1") :: Row("3", "3") :: Nil)
+    }
+  }
+
 }

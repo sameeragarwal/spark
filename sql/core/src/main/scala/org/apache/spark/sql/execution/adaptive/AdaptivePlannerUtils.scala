@@ -19,6 +19,8 @@ package org.apache.spark.sql.execution.adaptive
 
 import java.util.{HashMap => JHashMap}
 
+import scala.collection.JavaConverters._
+
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.MultiInstanceRelation
@@ -28,8 +30,6 @@ import org.apache.spark.sql.catalyst.plans.physical.Partitioning
 import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.{SQLContext, execution}
 import org.apache.spark.{MapOutputStatistics, ShuffleDependency, SimpleFutureAction}
-
-import scala.collection.JavaConverters._
 
 object AdaptivePlannerUtils {
   def runSubtree(partiallyPlanned: LogicalPlan, sqlContext: SQLContext): LogicalPlan = {

@@ -17,15 +17,16 @@
 
 package org.apache.spark.sql.execution.adaptive
 
-import org.apache.spark.sql.execution.aggregate.{SortBasedAggregate, TungstenAggregate}
-import org.apache.spark.sql.{Strategy, SQLContext}
 import org.apache.spark.sql.catalyst.CatalystConf
-import org.apache.spark.sql.catalyst.expressions.Attribute
+import org.apache.spark.sql.catalyst.expressions.{Attribute, InSet, Literal}
 import org.apache.spark.sql.catalyst.planning.QueryPlanner
-import org.apache.spark.sql.catalyst.plans.logical.{UnaryNode, LeafNode, LogicalPlan}
-import org.apache.spark.sql.catalyst.plans.physical.UnspecifiedDistribution
+import org.apache.spark.sql.catalyst.plans.logical
+import org.apache.spark.sql.catalyst.plans.logical.{LeafNode, LogicalPlan}
 import org.apache.spark.sql.catalyst.rules.{Rule, RuleExecutor}
-import org.apache.spark.sql.execution.{Sort, Exchange, EnsureRequirements, SparkPlan}
+import org.apache.spark.sql.execution._
+import org.apache.spark.sql.execution.aggregate.{SortBasedAggregate, TungstenAggregate}
+import org.apache.spark.sql.execution.joins.{BroadcastHashJoin, BuildLeft, BuildRight}
+import org.apache.spark.sql.{Column, DataFrame, SQLContext}
 
 class AdaptivePlanner(
     sqlContext: SQLContext,
@@ -53,12 +54,50 @@ class AdaptivePlanner(
           val executedPlan = prepareForExecution.execute(planned)
           assert(p.children.length == executedPlan.children.length)
           // TODO: this only works with join. It does not work with aggregation.
-          println(executedPlan)
           val newChildren = p.children.zip(executedPlan.children).map {
             case (logicalChild, e: Exchange) =>
               BoundaryLogicalPlan(e)
             case (logicalChild, Sort(_, _, e: Exchange, _)) =>
               BoundaryLogicalPlan(e)
+            case (logicalChild, e: BroadcastHashJoin) =>
+              e.buildSide match {
+                case BuildRight =>
+                  val df = DataFrame(sqlContext, logicalChild.children(1))
+                  val set = df.select(e.rightKeys.map(Column(_)): _*).collect()
+                    .distinct.map(_.get(0)).map(Literal(_).value)
+                  val condition = InSet(e.leftKeys.head, set.toSet)
+                  if (!logicalChild.children.head.isInstanceOf[logical.Filter] ||
+                    (logicalChild.children.head.isInstanceOf[logical.Filter] &&
+                      logicalChild.children.head.asInstanceOf[logical.Filter].condition != condition)) {
+                    val filterOp = logical.Filter(InSet(e.leftKeys.head, set.toSet),
+                      logicalChild.children.head)
+                    val childToReplace = logicalChild.children.head
+                    logicalChild transformUp {
+                      case i if i == childToReplace && childToReplace != filterOp =>
+                        filterOp
+                    }
+                  } else {
+                    logicalChild
+                  }
+                case BuildLeft =>
+                  val df = DataFrame(sqlContext, logicalChild.children.head)
+                  val set = df.select(e.rightKeys.map(Column(_)): _*).collect()
+                    .distinct.map(_.get(0)).map(Literal(_).value)
+                  val condition = InSet(e.rightKeys.head, set.toSet)
+                  if (!logicalChild.children(1).isInstanceOf[logical.Filter] ||
+                    (logicalChild.children(1).isInstanceOf[logical.Filter] &&
+                      logicalChild.children(1).asInstanceOf[logical.Filter].condition != condition)) {
+                    val filterOp = logical.Filter(InSet(e.rightKeys.head, set.toSet),
+                      logicalChild.children(1))
+                    val childToReplace = logicalChild.children(1)
+                    logicalChild transformUp {
+                      case i if i == childToReplace && childToReplace != filterOp =>
+                        filterOp
+                    }
+                  } else {
+                    logicalChild
+                  }
+              }
             case (logicalChild, agg: TungstenAggregate) =>
               sys.error("right now, aggregate does not work")
             case (logicalChild, agg: SortBasedAggregate) =>
