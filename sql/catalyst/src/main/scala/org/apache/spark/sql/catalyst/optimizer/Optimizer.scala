@@ -871,29 +871,13 @@ object ReorderJoin extends Rule[LogicalPlan] with PredicateHelper {
  * This rule should be executed before pushing down the Filter
  */
 object OuterJoinElimination extends Rule[LogicalPlan] with PredicateHelper {
+
   private def buildNewJoin(filter: Filter, join: Join): Join = {
 
-    val leftHasNonNullPredicate = filter.constraints.exists(e => e match {
-      case IsNotNull(e) =>
-        join.left.outputSet.exists(_.semanticEquals(e))
-      case _ =>
-        false
-    })
-    /*
-        val leftHasNonNullPredicate = filter.constraints.map {
-          case IsNotNull(e) =>
-            join.left.outputSet.exists(_.semanticEquals(e))
-          case _ =>
-            false
-        }.reduce(_ || _)
-    */
-
-    val rightHasNonNullPredicate = filter.constraints.map {
-      case IsNotNull(e) =>
-        join.right.outputSet.exists(_.semanticEquals(e))
-      case _ =>
-        false
-    }.reduce(_ || _)
+    val leftHasNonNullPredicate = filter.constraints.filter(_.isInstanceOf[IsNotNull])
+      .exists(expr => join.left.outputSet.intersect(expr.references).nonEmpty)
+    val rightHasNonNullPredicate = filter.constraints.filter(_.isInstanceOf[IsNotNull])
+      .exists(expr => join.right.outputSet.intersect(expr.references).nonEmpty)
 
     join.joinType match {
       case RightOuter if leftHasNonNullPredicate =>
