@@ -71,7 +71,8 @@ public class VectorizedParquetRecordReader extends SpecificParquetRecordReaderBa
   private int numBatched = 0;
 
   /**
-   * For each request column, the reader to read this column.
+   * For each request column, the reader to read this column. This is NULL if this column
+   * is missing from the file, in which case we populate the attribute with NULL.
    */
   private VectorizedColumnReader[] columnReaders;
 
@@ -84,6 +85,11 @@ public class VectorizedParquetRecordReader extends SpecificParquetRecordReaderBa
    * The number of rows that have been reading, including the current in flight row group.
    */
   private long totalCountLoadedSoFar = 0;
+
+  /**
+   * For each column, true if the column is missing in the file and we'll instead return NULLs.
+   */
+  private boolean[] missingColumns;
 
   /**
    * columnBatch object that is used for batch decoding. This is created on first use and triggers
@@ -189,32 +195,46 @@ public class VectorizedParquetRecordReader extends SpecificParquetRecordReaderBa
   // Columns 0,1: data columns
   // Column 2: partitionValues[0]
   // Column 3: partitionValues[1]
-  public ColumnarBatch initBatch(StructType partitionColumns, InternalRow partitionValues) {
+  public void initBatch(MemoryMode memMode, StructType partitionColumns,
+                        InternalRow partitionValues) {
     StructType batchSchema = new StructType();
     for (StructField f: sparkSchema.fields()) {
       batchSchema = batchSchema.add(f);
     }
-    for (StructField f: partitionColumns.fields()) {
-      batchSchema = batchSchema.add(f);
+    if (partitionColumns != null) {
+      for (StructField f : partitionColumns.fields()) {
+        batchSchema = batchSchema.add(f);
+      }
     }
 
     columnarBatch = ColumnarBatch.allocate(batchSchema);
-    int partitionIdx = sparkSchema.fields().length;
-    for (int i = 0; i < partitionColumns.fields().length; i++) {
-      ColumnVectorUtils.populate(columnarBatch.column(i + partitionIdx), partitionValues, i);
-      columnarBatch.column(i + partitionIdx).setIsConstant();
+    if (partitionColumns != null) {
+      int partitionIdx = sparkSchema.fields().length;
+      for (int i = 0; i < partitionColumns.fields().length; i++) {
+        ColumnVectorUtils.populate(columnarBatch.column(i + partitionIdx), partitionValues, i);
+        columnarBatch.column(i + partitionIdx).setIsConstant();
+      }
     }
-    return columnarBatch;
+
+    // Initialize missing columns with nulls.
+    for (int i = 0; i < missingColumns.length; i++) {
+      if (missingColumns[i]) {
+        columnarBatch.column(i).putNulls(0, columnarBatch.capacity());
+        columnarBatch.column(i).setIsConstant();
+      }
+    }
+  }
+
+  public void initBatch() {
+    initBatch(DEFAULT_MEMORY_MODE, null, null);
+  }
+
+  public void initBatch(StructType partitionColumns, InternalRow partitionValues) {
+    initBatch(DEFAULT_MEMORY_MODE, partitionColumns, partitionValues);
   }
 
   public ColumnarBatch resultBatch() {
-    return resultBatch(DEFAULT_MEMORY_MODE);
-  }
-
-  public ColumnarBatch resultBatch(MemoryMode memMode) {
-    if (columnarBatch == null) {
-      columnarBatch = ColumnarBatch.allocate(sparkSchema, memMode);
-    }
+    if (columnarBatch == null) initBatch();
     return columnarBatch;
   }
 
@@ -235,6 +255,7 @@ public class VectorizedParquetRecordReader extends SpecificParquetRecordReaderBa
 
     int num = (int) Math.min((long) columnarBatch.capacity(), totalCountLoadedSoFar - rowsReturned);
     for (int i = 0; i < columnReaders.length; ++i) {
+      if (columnReaders[i] == null) continue;
       columnReaders[i].readBatch(num, columnarBatch.column(i));
     }
     rowsReturned += num;
@@ -249,6 +270,7 @@ public class VectorizedParquetRecordReader extends SpecificParquetRecordReaderBa
      * Check that the requested schema is supported.
      */
     OriginalType[] originalTypes = new OriginalType[requestedSchema.getFieldCount()];
+    missingColumns = new boolean[requestedSchema.getFieldCount()];
     for (int i = 0; i < requestedSchema.getFieldCount(); ++i) {
       Type t = requestedSchema.getFields().get(i);
       if (!t.isPrimitive() || t.isRepetition(Type.Repetition.REPEATED)) {
@@ -271,9 +293,19 @@ public class VectorizedParquetRecordReader extends SpecificParquetRecordReaderBa
       if (primitiveType.getPrimitiveTypeName() == PrimitiveType.PrimitiveTypeName.INT96) {
         throw new IOException("Int96 not supported.");
       }
-      ColumnDescriptor fd = fileSchema.getColumnDescription(requestedSchema.getPaths().get(i));
-      if (!fd.equals(requestedSchema.getColumns().get(i))) {
-        throw new IOException("Schema evolution not supported.");
+      String[] colPath = requestedSchema.getPaths().get(i);
+      if (fileSchema.containsPath(colPath)) {
+        ColumnDescriptor fd = fileSchema.getColumnDescription(colPath);
+        if (!fd.equals(requestedSchema.getColumns().get(i))) {
+          throw new IOException("Schema evolution not supported.");
+        }
+        missingColumns[i] = false;
+      } else {
+        if (requestedSchema.getColumns().get(i).getMaxDefinitionLevel() == 0) {
+          // Column is missing in data but the required data is non-nullable. This file is invalid.
+          throw new IOException("Required column is missing in data file. Col: " + colPath);
+        }
+        missingColumns[i] = true;
       }
     }
   }
@@ -726,6 +758,7 @@ public class VectorizedParquetRecordReader extends SpecificParquetRecordReaderBa
     List<ColumnDescriptor> columns = requestedSchema.getColumns();
     columnReaders = new VectorizedColumnReader[columns.size()];
     for (int i = 0; i < columns.size(); ++i) {
+      if (missingColumns[i]) continue;
       columnReaders[i] = new VectorizedColumnReader(columns.get(i),
           pages.getPageReader(columns.get(i)));
     }
