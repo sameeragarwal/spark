@@ -123,7 +123,7 @@ class BenchmarkWholeStageCodegen extends SparkFunSuite {
       */
   }
 
-  test("aggregate with keys") {
+  ignore("aggregate with keys") {
     val N = 20 << 20
 
     runBenchmark("Aggregate w keys", N) {
@@ -303,7 +303,7 @@ class BenchmarkWholeStageCodegen extends SparkFunSuite {
       */
   }
 
-  ignore("hash and BytesToBytesMap") {
+  test("hash and BytesToBytesMap") {
     val N = 10 << 20
 
     val benchmark = new Benchmark("BytesToBytesMap", N)
@@ -461,6 +461,29 @@ class BenchmarkWholeStageCodegen extends SparkFunSuite {
               value.getBaseObject, value.getBaseOffset, value.getSizeInBytes)
           }
         }
+      }
+    }
+
+    benchmark.addCase("Vectorized Hashmap") { iter =>
+      var i = 0
+      val keyBytes = new Array[Byte](16)
+      val valueBytes = new Array[Byte](16)
+      val value = new UnsafeRow(1)
+      value.pointTo(valueBytes, Platform.BYTE_ARRAY_OFFSET, 16)
+      value.setInt(0, 555)
+      val map = new HashMap[Long, UnsafeRow]()
+      while (i < 65536) {
+        value.setInt(0, i)
+        map.put(i.toLong, value)
+        i += 1
+      }
+      var s = 0
+      i = 0
+      while (i < N) {
+        if (map.get(i % 100000) != null) {
+          s += 1
+        }
+        i += 1
       }
     }
 
