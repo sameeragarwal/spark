@@ -46,7 +46,7 @@ import org.apache.spark.unsafe.types.UTF8String;
  */
 public final class ColumnarBatch {
   private static final int DEFAULT_BATCH_SIZE = 4 * 1024;
-  private static MemoryMode DEFAULT_MEMORY_MODE = MemoryMode.ON_HEAP;
+  public static MemoryMode DEFAULT_MEMORY_MODE = MemoryMode.ON_HEAP;
 
   private final StructType schema;
   private final int capacity;

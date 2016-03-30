@@ -308,6 +308,7 @@ class BenchmarkWholeStageCodegen extends SparkFunSuite {
 
     val benchmark = new Benchmark("BytesToBytesMap", N)
 
+/*
     benchmark.addCase("hash") { iter =>
       var i = 0
       val keyBytes = new Array[Byte](16)
@@ -355,6 +356,7 @@ class BenchmarkWholeStageCodegen extends SparkFunSuite {
         i += 1
       }
     }
+*/
 
     benchmark.addCase("Java HashMap (Long)") { iter =>
       var i = 0
@@ -379,6 +381,7 @@ class BenchmarkWholeStageCodegen extends SparkFunSuite {
       }
     }
 
+/*
     benchmark.addCase("Java HashMap (two ints) ") { iter =>
       var i = 0
       val valueBytes = new Array[Byte](16)
@@ -429,6 +432,7 @@ class BenchmarkWholeStageCodegen extends SparkFunSuite {
         i += 1
       }
     }
+    */
 
     Seq("off", "on").foreach { heap =>
       benchmark.addCase(s"BytesToBytesMap ($heap Heap)") { iter =>
@@ -464,23 +468,20 @@ class BenchmarkWholeStageCodegen extends SparkFunSuite {
       }
     }
 
+
     benchmark.addCase("Vectorized Hashmap") { iter =>
       var i = 0
-      val keyBytes = new Array[Byte](16)
-      val valueBytes = new Array[Byte](16)
-      val value = new UnsafeRow(1)
-      value.pointTo(valueBytes, Platform.BYTE_ARRAY_OFFSET, 16)
-      value.setInt(0, 555)
-      val map = new HashMap[Long, UnsafeRow]()
+      val map = new VectorizedSingleKeyAggregationMap()
       while (i < 65536) {
-        value.setInt(0, i)
-        map.put(i.toLong, value)
+        map.incrementCount(i.toLong)
+        // value.setInt(0, i)
+        // map.put(i.toLong, value)
         i += 1
       }
       var s = 0
       i = 0
       while (i < N) {
-        if (map.get(i % 100000) != null) {
+        if (map.get(i % 100000) != -1) {
           s += 1
         }
         i += 1
