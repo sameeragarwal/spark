@@ -14,6 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.spark.sql.execution.datasources.parquet
 
 import java.io.File
@@ -28,7 +29,7 @@ import org.apache.spark.sql.execution.vectorized.ColumnarBatch
 import org.apache.spark.util.{Benchmark, Utils}
 
 /**
- * Benchmark to measure parquet read performance.
+ * Benchmark to measure TPCDS query performance.
  * To run this:
  *  spark-submit --class <this class> --jars <spark sql test jar>
  */
@@ -61,177 +62,6 @@ object TPCDSBenchmark {
       keys.zip(currentValues).foreach {
         case (key, Some(value)) => sqlContext.conf.setConfString(key, value)
         case (key, None) => sqlContext.conf.unsetConf(key)
-      }
-    }
-  }
-
-  def intScanBenchmark(values: Int): Unit = {
-    // Benchmarks running through spark sql.
-    val sqlBenchmark = new Benchmark("SQL Single Int Column Scan", values)
-    // Benchmarks driving reader component directly.
-    val parquetReaderBenchmark = new Benchmark("Parquet Reader Single Int Column Scan", values)
-
-    withTempPath { dir =>
-      withTempTable("t1", "tempTable") {
-        sqlContext.range(values).registerTempTable("t1")
-        sqlContext.sql("select cast(id as INT) as id from t1")
-          .write.parquet(dir.getCanonicalPath)
-        sqlContext.read.parquet(dir.getCanonicalPath).registerTempTable("tempTable")
-
-        sqlBenchmark.addCase("SQL Parquet Reader") { iter =>
-          sqlContext.sql("select sum(id) from tempTable").collect()
-        }
-
-        sqlBenchmark.addCase("SQL Parquet MR") { iter =>
-          withSQLConf(SQLConf.PARQUET_VECTORIZED_READER_ENABLED.key -> "false") {
-            sqlContext.sql("select sum(id) from tempTable").collect()
-          }
-        }
-
-        sqlBenchmark.addCase("SQL Parquet Vectorized") { iter =>
-          withSQLConf(SQLConf.PARQUET_VECTORIZED_READER_ENABLED.key -> "true") {
-            sqlContext.sql("select sum(id) from tempTable").collect()
-          }
-        }
-
-        val files = SpecificParquetRecordReaderBase.listDirectory(dir).toArray
-        // Driving the parquet reader directly without Spark.
-        parquetReaderBenchmark.addCase("ParquetReader") { num =>
-          var sum = 0L
-          files.map(_.asInstanceOf[String]).foreach { p =>
-            val reader = new VectorizedParquetRecordReader
-            reader.initialize(p, ("id" :: Nil).asJava)
-
-            while (reader.nextKeyValue()) {
-              val record = reader.getCurrentValue.asInstanceOf[ColumnarBatch.Row]
-              if (!record.isNullAt(0)) sum += record.getInt(0)
-            }
-            reader.close()
-          }
-        }
-
-        // Driving the parquet reader in batch mode directly.
-        parquetReaderBenchmark.addCase("ParquetReader(Batched)") { num =>
-          var sum = 0L
-          files.map(_.asInstanceOf[String]).foreach { p =>
-            val reader = new VectorizedParquetRecordReader
-            try {
-              reader.initialize(p, ("id" :: Nil).asJava)
-              val batch = reader.resultBatch()
-              val col = batch.column(0)
-              while (reader.nextBatch()) {
-                val numRows = batch.numRows()
-                var i = 0
-                while (i < numRows) {
-                  if (!col.isNullAt(i)) sum += col.getInt(i)
-                  i += 1
-                }
-              }
-            } finally {
-              reader.close()
-            }
-          }
-        }
-
-        // Decoding in vectorized but having the reader return rows.
-        parquetReaderBenchmark.addCase("ParquetReader(Batch -> Row)") { num =>
-          var sum = 0L
-          files.map(_.asInstanceOf[String]).foreach { p =>
-            val reader = new VectorizedParquetRecordReader
-            try {
-              reader.initialize(p, ("id" :: Nil).asJava)
-              val batch = reader.resultBatch()
-              while (reader.nextBatch()) {
-                val it = batch.rowIterator()
-                while (it.hasNext) {
-                  val record = it.next()
-                  if (!record.isNullAt(0)) sum += record.getInt(0)
-                }
-              }
-            } finally {
-              reader.close()
-            }
-          }
-        }
-
-        /*
-        Intel(R) Core(TM) i7-4870HQ CPU @ 2.50GHz
-        SQL Single Int Column Scan:        Avg Time(ms)    Avg Rate(M/s)  Relative Rate
-        -------------------------------------------------------------------------------
-        SQL Parquet Reader                      1350.56            11.65         1.00 X
-        SQL Parquet MR                          1844.09             8.53         0.73 X
-        SQL Parquet Vectorized                  1062.04            14.81         1.27 X
-        */
-        sqlBenchmark.run()
-
-        /*
-        Intel(R) Core(TM) i7-4870HQ CPU @ 2.50GHz
-        Parquet Reader Single Int Column Scan:     Avg Time(ms)    Avg Rate(M/s)  Relative Rate
-        -------------------------------------------------------------------------------
-        ParquetReader                            610.40            25.77         1.00 X
-        ParquetReader(Batched)                   172.66            91.10         3.54 X
-        ParquetReader(Batch -> Row)              192.28            81.80         3.17 X
-        */
-        parquetReaderBenchmark.run()
-      }
-    }
-  }
-
-  def intStringScanBenchmark(values: Int): Unit = {
-    val benchmark = new Benchmark("Int and String Scan", values)
-
-    withTempPath { dir =>
-      withTempTable("t1", "tempTable") {
-        sqlContext.range(values).registerTempTable("t1")
-        sqlContext.sql("select cast(id as INT) as c1, cast(id as STRING) as c2 from t1")
-          .write.parquet(dir.getCanonicalPath)
-        sqlContext.read.parquet(dir.getCanonicalPath).registerTempTable("tempTable")
-
-        val benchmark = new Benchmark("Int and String Scan", values)
-
-        benchmark.addCase("SQL Parquet Reader") { iter =>
-          sqlContext.sql("select sum(c1), sum(length(c2)) from tempTable").collect
-        }
-
-        benchmark.addCase("SQL Parquet MR") { iter =>
-          withSQLConf(SQLConf.PARQUET_VECTORIZED_READER_ENABLED.key -> "false") {
-            sqlContext.sql("select sum(c1), sum(length(c2)) from tempTable").collect
-          }
-        }
-
-        benchmark.addCase("SQL Parquet Vectorized") { iter =>
-          withSQLConf(SQLConf.PARQUET_VECTORIZED_READER_ENABLED.key -> "true") {
-            sqlContext.sql("select sum(c1), sum(length(c2)) from tempTable").collect
-          }
-        }
-
-
-        val files = SpecificParquetRecordReaderBase.listDirectory(dir).toArray
-        benchmark.addCase("ParquetReader") { num =>
-          var sum1 = 0L
-          var sum2 = 0L
-          files.map(_.asInstanceOf[String]).foreach { p =>
-            val reader = new VectorizedParquetRecordReader
-            reader.initialize(p, null)
-            while (reader.nextKeyValue()) {
-              val record = reader.getCurrentValue.asInstanceOf[ColumnarBatch.Row]
-              if (!record.isNullAt(0)) sum1 += record.getInt(0)
-              if (!record.isNullAt(1)) sum2 += record.getUTF8String(1).numBytes()
-            }
-            reader.close()
-          }
-        }
-
-        /*
-        Intel(R) Core(TM) i7-4870HQ CPU @ 2.50GHz
-        Int and String Scan:               Avg Time(ms)    Avg Rate(M/s)  Relative Rate
-        -------------------------------------------------------------------------------
-        SQL Parquet Reader                      1737.94             6.03         1.00 X
-        SQL Parquet MR                          2393.08             4.38         0.73 X
-        SQL Parquet Vectorized                  1442.99             7.27         1.20 X
-        ParquetReader                           1032.11            10.16         1.68 X
-        */
-        benchmark.run()
       }
     }
   }
@@ -1218,35 +1048,33 @@ object TPCDSBenchmark {
     }
 
     /**
-    Intel(R) Core(TM) i7-4870HQ CPU @ 2.50GHz
-    TPCDS Snappy:                       Best/Avg Time(ms)    Rate(M/s)   Per Row(ns)   Relative
-    -------------------------------------------------------------------------------------------
-    ParquetReader                            2052 / 2119         14.0          71.3       1.0X
-    counts                                   2580 / 2633         11.2          89.6       0.8X
-    Q19                                      3607 / 3720          8.0         125.2       0.6X
-
-    counts (master)                          5608 / 5732          5.1         194.7       0.3X
-    Q19 (master)                             5418 / 5682          5.3         188.1       0.4X
-
-    TPCDS Uncompressed:                Best/Avg Time(ms)    Rate(M/s)   Per Row(ns)   Relative
-    -------------------------------------------------------------------------------------------
-    ParquetReader                            1929 / 2031         14.9          67.0       1.0X
-    counts                                   2427 / 2460         11.9          84.3       0.8X
-    Q19                                      3421 / 3598          8.4         118.8       0.6X
-
-    TPCDS GZIP:                        Best/Avg Time(ms)    Rate(M/s)   Per Row(ns)   Relative
-    -------------------------------------------------------------------------------------------
-    ParquetReader                            3475 / 3626          8.3         120.6       1.0X
-    counts                                   3559 / 3727          8.1         123.6       1.0X
-    Q19                                      4876 / 5139          5.9         169.3       0.7X
+     * Intel(R) Core(TM) i7-4870HQ CPU @ 2.50GHz
+     * TPCDS Snappy:                       Best/Avg Time(ms)    Rate(M/s)   Per Row(ns)   Relative
+     * -------------------------------------------------------------------------------------------
+     * ParquetReader                            2052 / 2119         14.0          71.3       1.0X
+     * counts                                   2580 / 2633         11.2          89.6       0.8X
+     * Q19                                      3607 / 3720          8.0         125.2       0.6X
+     **
+     *counts (master)                          5608 / 5732          5.1         194.7       0.3X
+     *Q19 (master)                             5418 / 5682          5.3         188.1       0.4X
+     **
+     *TPCDS Uncompressed:                Best/Avg Time(ms)    Rate(M/s)   Per Row(ns)   Relative
+     *-------------------------------------------------------------------------------------------
+     *ParquetReader                            1929 / 2031         14.9          67.0       1.0X
+     *counts                                   2427 / 2460         11.9          84.3       0.8X
+     *Q19                                      3421 / 3598          8.4         118.8       0.6X
+     **
+     *TPCDS GZIP:                        Best/Avg Time(ms)    Rate(M/s)   Per Row(ns)   Relative
+     *-------------------------------------------------------------------------------------------
+     *ParquetReader                            3475 / 3626          8.3         120.6       1.0X
+     *counts                                   3559 / 3727          8.1         123.6       1.0X
+     *Q19                                      4876 / 5139          5.9         169.3       0.7X
      */
     benchmark.run()
   }
 
   def main(args: Array[String]): Unit = {
-    // intScanBenchmark(1024 * 1024 * 15)
-    // intStringScanBenchmark(1024 * 1024 * 10)
-    tpcdsAll()
-    // tpcdsBenchmark()
+    // tpcdsAll()
+    tpcdsBenchmark()
   }
 }
