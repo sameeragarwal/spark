@@ -19,13 +19,11 @@ package org.apache.spark.sql.execution.datasources.parquet
 
 import java.io.File
 
-import scala.collection.JavaConverters._
 import scala.util.Try
 
 import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.SQLContext
-import org.apache.spark.sql.execution.vectorized.ColumnarBatch
 import org.apache.spark.util.{Benchmark, Utils}
 
 /**
@@ -757,7 +755,67 @@ object TPCDSBenchmark {
               |limit 100
             """.stripMargin),
 
-    /*
+      ("q8",
+        """
+          |select  s_store_name
+          |      ,sum(ss_net_profit)
+          | from store_sales
+          |     ,date_dim
+          |     ,store,
+          |     (select distinct a01.ca_zip
+          |     from
+          |     (SELECT substr(ca_zip,1,5) ca_zip
+          |      FROM customer_address
+          |      WHERE substr(ca_zip,1,5) IN ('89436', '30868', '65085', '22977', '83927', '77557', '58429', '40697', '80614', '10502', '32779',
+          |      '91137', '61265', '98294', '17921', '18427', '21203', '59362', '87291', '84093', '21505', '17184', '10866', '67898', '25797',
+          |      '28055', '18377', '80332', '74535', '21757', '29742', '90885', '29898', '17819', '40811', '25990', '47513', '89531', '91068',
+          |      '10391', '18846', '99223', '82637', '41368', '83658', '86199', '81625', '26696', '89338', '88425', '32200', '81427', '19053',
+          |      '77471', '36610', '99823', '43276', '41249', '48584', '83550', '82276', '18842', '78890', '14090', '38123', '40936', '34425',
+          |      '19850', '43286', '80072', '79188', '54191', '11395', '50497', '84861', '90733', '21068', '57666', '37119', '25004', '57835',
+          |      '70067', '62878', '95806', '19303', '18840', '19124', '29785', '16737', '16022', '49613', '89977', '68310', '60069', '98360',
+          |      '48649', '39050', '41793', '25002', '27413', '39736', '47208', '16515', '94808', '57648', '15009', '80015', '42961', '63982',
+          |      '21744', '71853', '81087', '67468', '34175', '64008', '20261', '11201', '51799', '48043', '45645', '61163', '48375', '36447',
+          |      '57042', '21218', '41100', '89951', '22745', '35851', '83326', '61125', '78298', '80752', '49858', '52940', '96976', '63792',
+          |      '11376', '53582', '18717', '90226', '50530', '94203', '99447', '27670', '96577', '57856', '56372', '16165', '23427', '54561',
+          |      '28806', '44439', '22926', '30123', '61451', '92397', '56979', '92309', '70873', '13355', '21801', '46346', '37562', '56458',
+          |      '28286', '47306', '99555', '69399', '26234', '47546', '49661', '88601', '35943', '39936', '25632', '24611', '44166', '56648',
+          |      '30379', '59785', '11110', '14329', '93815', '52226', '71381', '13842', '25612', '63294', '14664', '21077', '82626', '18799',
+          |      '60915', '81020', '56447', '76619', '11433', '13414', '42548', '92713', '70467', '30884', '47484', '16072', '38936', '13036',
+          |      '88376', '45539', '35901', '19506', '65690', '73957', '71850', '49231', '14276', '20005', '18384', '76615', '11635', '38177',
+          |      '55607', '41369', '95447', '58581', '58149', '91946', '33790', '76232', '75692', '95464', '22246', '51061', '56692', '53121',
+          |      '77209', '15482', '10688', '14868', '45907', '73520', '72666', '25734', '17959', '24677', '66446', '94627', '53535', '15560',
+          |      '41967', '69297', '11929', '59403', '33283', '52232', '57350', '43933', '40921', '36635', '10827', '71286', '19736', '80619',
+          |      '25251', '95042', '15526', '36496', '55854', '49124', '81980', '35375', '49157', '63512', '28944', '14946', '36503', '54010',
+          |      '18767', '23969', '43905', '66979', '33113', '21286', '58471', '59080', '13395', '79144', '70373', '67031', '38360', '26705',
+          |      '50906', '52406', '26066', '73146', '15884', '31897', '30045', '61068', '45550', '92454', '13376', '14354', '19770', '22928',
+          |      '97790', '50723', '46081', '30202', '14410', '20223', '88500', '67298', '13261', '14172', '81410', '93578', '83583', '46047',
+          |      '94167', '82564', '21156', '15799', '86709', '37931', '74703', '83103', '23054', '70470', '72008', '35709', '91911', '69998',
+          |      '20961', '70070', '63197', '54853', '88191', '91830', '49521', '19454', '81450', '89091', '62378', '31904', '61869', '51744',
+          |      '36580', '85778', '36871', '48121', '28810', '83712', '45486', '67393', '26935', '42393', '20132', '55349', '86057', '21309',
+          |      '80218', '10094', '11357', '48819', '39734', '40758', '30432', '21204', '29467', '30214', '61024', '55307', '74621', '11622',
+          |      '68908', '33032', '52868', '99194', '99900', '84936', '69036', '99149', '45013', '32895', '59004', '32322', '14933', '32936',
+          |      '33562', '72550', '27385', '58049', '58200', '16808', '21360', '32961', '18586', '79307', '15492'
+          |                          )) a01
+          |     inner join
+          |     (select ca_zip
+          |      from (SELECT substr(ca_zip,1,5) ca_zip,count(*) cnt
+          |            FROM customer_address, customer
+          |            WHERE ca_address_sk = c_current_addr_sk and
+          |                  c_preferred_cust_flag='Y'
+          |            group by ca_zip
+          |            having count(*) > 10)A1
+          |      ) b11
+          |      on (a01.ca_zip = b11.ca_zip )) A2
+          | where ss_store_sk = s_store_sk
+          |  and ss_sold_date_sk = d_date_sk
+          |  and ss_sold_date_sk between 2451271 and 2451361
+          |  and d_qoy = 2 and d_year = 1999
+          |  and (substr(s_zip,1,2) = substr(a2.ca_zip,1,2))
+          | group by s_store_name
+          | order by s_store_name
+          |limit 100
+        """.stripMargin),
+
       ("q82", """
                 |select
                 |  i_item_id,
@@ -780,7 +838,6 @@ object TPCDSBenchmark {
                 |  i_item_id
                 |limit 100
               """.stripMargin),
-              */
 
     ("q89", """
               |select
@@ -820,87 +877,6 @@ object TPCDSBenchmark {
               |  s_store_name
               |limit 100
             """.stripMargin),
-
-    ("q14a", """
-               |with cross_items as
-               | (select i_item_sk ss_item_sk
-               | from item,
-               |    (select iss.i_brand_id brand_id, iss.i_class_id class_id, iss.i_category_id category_id
-               |     from store_sales, item iss, date_dim d1
-               |     where ss_item_sk = iss.i_item_sk
-                    and ss_sold_date_sk = d1.d_date_sk
-               |       and d1.d_year between 1999 AND 1999 + 2
-               |   intersect
-               |     select ics.i_brand_id, ics.i_class_id, ics.i_category_id
-               |     from catalog_sales, item ics, date_dim d2
-               |     where cs_item_sk = ics.i_item_sk
-               |       and cs_sold_date_sk = d2.d_date_sk
-               |       and d2.d_year between 1999 AND 1999 + 2
-               |   intersect
-               |     select iws.i_brand_id, iws.i_class_id, iws.i_category_id
-               |     from web_sales, item iws, date_dim d3
-               |     where ws_item_sk = iws.i_item_sk
-               |       and ws_sold_date_sk = d3.d_date_sk
-               |       and d3.d_year between 1999 AND 1999 + 2) x
-               | where i_brand_id = brand_id
-               |   and i_class_id = class_id
-               |   and i_category_id = category_id
-               |),
-               | avg_sales as
-               | (select avg(quantity*list_price) average_sales
-               |  from (
-               |     select ss_quantity quantity, ss_list_price list_price
-               |     from store_sales, date_dim
-               |     where ss_sold_date_sk = d_date_sk
-               |       and d_year between 1999 and 2001
-               |   union all
-               |     select cs_quantity quantity, cs_list_price list_price
-               |     from catalog_sales, date_dim
-               |     where cs_sold_date_sk = d_date_sk
-               |       and d_year between 1999 and 1999 + 2
-               |   union all
-               |     select ws_quantity quantity, ws_list_price list_price
-               |     from web_sales, date_dim
-               |     where ws_sold_date_sk = d_date_sk
-               |       and d_year between 1999 and 1999 + 2) x)
-               | select channel, i_brand_id,i_class_id,i_category_id,sum(sales), sum(number_sales)
-               | from(
-               |     select 'store' channel, i_brand_id,i_class_id
-               |             ,i_category_id,sum(ss_quantity*ss_list_price) sales
-               |             , count(*) number_sales
-               |     from store_sales, item, date_dim
-               |     where ss_item_sk in (select ss_item_sk from cross_items)
-               |       and ss_item_sk = i_item_sk
-               |       and ss_sold_date_sk = d_date_sk
-               |       and d_year = 1999+2
-               |       and d_moy = 11
-               |     group by i_brand_id,i_class_id,i_category_id
-               |     having sum(ss_quantity*ss_list_price) > (select average_sales from avg_sales)
-               |   union all
-               |     select 'catalog' channel, i_brand_id,i_class_id,i_category_id, sum(cs_quantity*cs_list_price) sales, count(*) number_sales
-               |     from catalog_sales, item, date_dim
-               |     where cs_item_sk in (select ss_item_sk from cross_items)
-               |       and cs_item_sk = i_item_sk
-               |       and cs_sold_date_sk = d_date_sk
-               |       and d_year = 1999+2
-               |       and d_moy = 11
-               |     group by i_brand_id,i_class_id,i_category_id
-               |     having sum(cs_quantity*cs_list_price) > (select average_sales from avg_sales)
-               |   union all
-               |     select 'web' channel, i_brand_id,i_class_id,i_category_id, sum(ws_quantity*ws_list_price) sales , count(*) number_sales
-               |     from web_sales, item, date_dim
-               |     where ws_item_sk in (select ss_item_sk from cross_items)
-               |       and ws_item_sk = i_item_sk
-               |       and ws_sold_date_sk = d_date_sk
-               |       and d_year = 1999+2
-               |       and d_moy = 11
-               |     group by i_brand_id,i_class_id,i_category_id
-               |     having sum(ws_quantity*ws_list_price) > (select average_sales from avg_sales)
-               | ) y
-               | group by rollup (channel, i_brand_id,i_class_id,i_category_id)
-               | order by channel,i_brand_id,i_class_id,i_category_id
-               | limit 100
-             """.stripMargin),
 
     ("q98", """
               |select
@@ -945,27 +921,7 @@ object TPCDSBenchmark {
                  |  max(ss_store_sk) as max_ss_store_sk,
                  |  max(ss_promo_sk) as max_ss_promo_sk
                  |from store_sales
-               """.stripMargin),
-    ("filter", """
-                 | select count(*) from store_sales where ss_store_sk = 1
-               """.stripMargin),
-    ("join", """
-               | select count(i_current_price) from store_sales join item
-               |   on (store_sales.ss_item_sk = item.i_item_sk)
-               | where
-               |   i_category = 'Sports'
-               |   and ss_sold_date_sk between 2451911 and 2451941
-             """.stripMargin),
-    ("agg", """
-              | select count(ss_promo_sk) from store_sales
-              | where ss_sold_date_sk > 2451911
-              | group by ss_sold_date_sk
-            """.stripMargin),
-    ("join3", """
-                | select count(i_category), count(s_county) from store_sales
-                |   join item on (store_sales.ss_item_sk = item.i_item_sk)
-                |   join store on (store_sales.ss_store_sk = store.s_store_sk)
-              """.stripMargin)).toArray
+               """.stripMargin)).toArray
 
   def tpcdsSetup(): String = {
     val HOME = "/Users/sameer/tpcds/"
@@ -992,89 +948,16 @@ object TPCDSBenchmark {
     sqlContext.conf.setConfString(SQLConf.PARQUET_VECTORIZED_READER_ENABLED.key, "true")
     sqlContext.conf.setConfString(SQLConf.WHOLESTAGE_CODEGEN_ENABLED.key, "true")
 
-    val benchmark = new Benchmark("TPCDS Snappy", 28800501 * 4, 1)
-    tpcds.filter(q => q._1 == "q14a").foreach(query => {
+    val benchmark = new Benchmark("TPCDS Snappy", 28800501 * 4, 5)
+    tpcds.filter(q => q._1 != "").foreach(query => {
       benchmark.addCase(query._1) { i =>
-        sqlContext.sql(query._2).show(2)
+        sqlContext.sql(query._2).collect()
       }
     })
-    benchmark.run
-  }
-
-  def tpcdsBenchmark(): Unit = {
-    val dir = tpcdsSetup()
-
-    sqlContext.conf.setConfString(SQLConf.PARQUET_VECTORIZED_READER_ENABLED.key, "true")
-    sqlContext.conf.setConfString(SQLConf.WHOLESTAGE_CODEGEN_ENABLED.key, "true")
-
-    val benchmark = new Benchmark("TPCDS", 28800501)
-    val query = sqlContext.sql(tpcds(0)._2)
-
-    val files = SpecificParquetRecordReaderBase.listDirectory(new File(dir)).toArray
-    // Driving the parquet reader directly without Spark.
-    benchmark.addCase("ParquetReader") { num =>
-      var sum = 0L
-      files.map(_.asInstanceOf[String]).foreach { p =>
-        val reader = new VectorizedParquetRecordReader
-        reader.initialize(p, ("ss_store_sk" :: "ss_sold_date_sk" :: "ss_ext_sales_price"
-          :: "ss_customer_sk" :: "ss_item_sk" :: Nil).asJava)
-        val batch = reader.resultBatch()
-        while (reader.nextBatch()) {
-          val it = batch.rowIterator()
-          while (it.hasNext) {
-            val record = it.next()
-            if (!record.isNullAt(0)) sum += 1
-            if (!record.isNullAt(1)) sum += 1
-            if (!record.isNullAt(2)) sum += 1
-            if (!record.isNullAt(3)) sum += 1
-            if (!record.isNullAt(4)) sum += 1
-          }
-        }
-        println(sum)
-        reader.close()
-      }
-    }
-
-    benchmark.addCase("counts") { i =>
-      sqlContext.sql(
-        s"""
-           | select count(ss_store_sk), count(ss_sold_date_sk), count(ss_ext_sales_price),
-           | count(ss_customer_sk), count(ss_item_sk) from store_sales
-         """.stripMargin).show
-    }
-
-    benchmark.addCase("Q19") { i =>
-      query.show(5)
-    }
-
-    /**
-     * Intel(R) Core(TM) i7-4870HQ CPU @ 2.50GHz
-     * TPCDS Snappy:                       Best/Avg Time(ms)    Rate(M/s)   Per Row(ns)   Relative
-     * -------------------------------------------------------------------------------------------
-     * ParquetReader                            2052 / 2119         14.0          71.3       1.0X
-     * counts                                   2580 / 2633         11.2          89.6       0.8X
-     * Q19                                      3607 / 3720          8.0         125.2       0.6X
-     **
-     *counts (master)                          5608 / 5732          5.1         194.7       0.3X
-     *Q19 (master)                             5418 / 5682          5.3         188.1       0.4X
-     **
-     *TPCDS Uncompressed:                Best/Avg Time(ms)    Rate(M/s)   Per Row(ns)   Relative
-     *-------------------------------------------------------------------------------------------
-     *ParquetReader                            1929 / 2031         14.9          67.0       1.0X
-     *counts                                   2427 / 2460         11.9          84.3       0.8X
-     *Q19                                      3421 / 3598          8.4         118.8       0.6X
-     **
-     *TPCDS GZIP:                        Best/Avg Time(ms)    Rate(M/s)   Per Row(ns)   Relative
-     *-------------------------------------------------------------------------------------------
-     *ParquetReader                            3475 / 3626          8.3         120.6       1.0X
-     *counts                                   3559 / 3727          8.1         123.6       1.0X
-     *Q19                                      4876 / 5139          5.9         169.3       0.7X
-     */
     benchmark.run()
   }
 
   def main(args: Array[String]): Unit = {
-    // tpcdsAll()
-    tpcdsBenchmark()
+    tpcdsAll()
   }
 }
