@@ -170,20 +170,25 @@ class CachedTableSuite extends QueryTest with TestHiveSingleton {
     checkAnswer(
       table("refreshTable"),
       table("src").collect())
+    table("refreshTable").explain(true)
     // Cache the table.
-    sql("CACHE TABLE refreshTable")
-    assertCached(table("refreshTable"))
+     sql("CACHE TABLE refreshTable")
+    assert(isCached("refreshTable"))
+    // assertCached(table("refreshTable"))
     // Append new data.
-    table("src").write.mode(SaveMode.Append).parquet(tempPath.toString)
+    table("src").write.mode(SaveMode.Append).insertInto("refreshTable") // .parquet(tempPath.toString)
     // We are still using the old data.
-    assertCached(table("refreshTable"))
+    assert(isCached("refreshTable"))
+    // assertCached(table("refreshTable"))
+    table("refreshTable").explain(true)
     checkAnswer(
       table("refreshTable"),
       table("src").collect())
     // Refresh the table.
     sql("REFRESH TABLE refreshTable")
     // We are using the new data.
-    assertCached(table("refreshTable"))
+    // assertCached(table("refreshTable"))
+    assert(isCached("refreshTable"))
     checkAnswer(
       table("refreshTable"),
       table("src").union(table("src")).collect())

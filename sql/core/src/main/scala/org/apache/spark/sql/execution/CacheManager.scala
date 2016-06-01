@@ -131,6 +131,16 @@ private[sql] class CacheManager extends Logging {
     lookupCachedData(query.queryExecution.analyzed)
   }
 
+  /** Optionally returns cached data for the given [[Dataset]] */
+  private[sql] def lookupCacheByTableName(tableName: String): Set[LogicalPlan] = readLock {
+    cachedData.map { cd =>
+      if (cd.cachedRepresentation.tableName.isDefined &&
+        cd.cachedRepresentation.tableName.get == tableName) {
+        cd.plan
+      }
+    }.toSet
+  }
+
   /** Optionally returns cached data for the given [[LogicalPlan]]. */
   private[sql] def lookupCachedData(plan: LogicalPlan): Option[CachedData] = readLock {
     cachedData.find(cd => plan.sameResult(cd.plan))

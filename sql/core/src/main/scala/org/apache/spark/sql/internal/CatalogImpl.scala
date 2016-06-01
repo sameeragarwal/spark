@@ -370,9 +370,10 @@ class CatalogImpl(sparkSession: SparkSession) extends Catalog {
       sparkSession.sharedState.cacheManager.tryUncacheQuery(df, blocking = true)
       // Cache it again.
       sparkSession.sharedState.cacheManager.cacheQuery(df, Some(tableIdent.table))
+    } else {
+
     }
   }
-
 }
 
 

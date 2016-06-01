@@ -122,7 +122,8 @@ class ListingFileCatalog(
 
   override def equals(other: Any): Boolean = other match {
     case hdfs: ListingFileCatalog =>
-      cachedLeafDirToChildrenFiles == hdfs.cachedLeafDirToChildrenFiles
+      paths.toSet == hdfs.paths.toSet &&
+        cachedLeafDirToChildrenFiles == hdfs.cachedLeafDirToChildrenFiles
     case _ => false
   }
 
