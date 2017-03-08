@@ -184,7 +184,7 @@ abstract class QueryPlan[PlanType <: QueryPlan[PlanType]] extends TreeNode[PlanT
    * example, if this set contains the expression `a = 2` then that expression is guaranteed to
    * evaluate to `true` for all rows produced.
    */
-  lazy val constraints: ExpressionSet = ExpressionSet(getRelevantConstraints(validConstraints))
+  lazy val constraints: ExpressionSet = ExpressionSet(Set.empty)
 
   /**
    * This method can be overridden by any child class of QueryPlan to specify a set of constraints
